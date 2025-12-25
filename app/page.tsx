@@ -7,7 +7,6 @@ import { StockInfo } from './components/StockInfo';
 import { PriceChart } from './components/PriceChart';
 import { AIAnalysis } from './components/AIAnalysis';
 import { NewsFeed } from './components/NewsFeed';
-import { getStockData, getChartData, getAnalysis, getNews } from '@/lib/mockData';
 
 export default function Home() {
   const [ticker, setTicker] = useState('AAPL');
@@ -16,23 +15,26 @@ export default function Home() {
   const [analysis, setAnalysis] = useState<any>(null);
   const [news, setNews] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   const fetchData = async (symbol: string) => {
     setLoading(true);
+    setError(null);
     try {
-      const [stock, chart, analysisData, newsData] = await Promise.all([
-        getStockData(symbol),
-        getChartData(symbol),
-        getAnalysis(symbol),
-        getNews(symbol)
-      ]);
+      const response = await fetch(`/api/stock/${symbol}`);
+      const data = await response.json();
 
-      setStockData(stock);
-      setChartData(chart);
-      setAnalysis(analysisData);
-      setNews(newsData);
-    } catch (error) {
-      console.error("Failed to fetch data", error);
+      if (data.error) {
+        throw new Error(data.error);
+      }
+
+      setStockData(data.stock);
+      setChartData(data.chart);
+      setAnalysis(data.analysis);
+      setNews(data.news);
+    } catch (err: any) {
+      console.error("Failed to fetch data", err);
+      setError(err.message || 'Failed to load stock data');
     } finally {
       setLoading(false);
     }
@@ -47,8 +49,11 @@ export default function Home() {
   };
 
   const handleRangeChange = async (range: string) => {
-    const newChartData = await getChartData(ticker, range);
-    setChartData(newChartData);
+    // For now, we only support daily data on the free tier integration.
+    // In a production app, we would fetch different resolutions here.
+    console.log(`Range changed to ${range} - keeping default view for free tier limit.`);
+    // Optionally re-fetch to ensure freshness
+    // fetchData(ticker); 
   };
 
   return (
@@ -58,7 +63,11 @@ export default function Home() {
 
         <SearchBar onSearch={handleSearch} />
 
-        {loading ? (
+        {error ? (
+          <div className="mt-8 p-4 bg-red-50 text-red-700 rounded-lg text-center">
+            {error}. Please try a valid US ticker like AAPL or TSLA.
+          </div>
+        ) : loading ? (
           <div className="flex items-center justify-center h-64">
             <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary"></div>
           </div>
@@ -66,7 +75,13 @@ export default function Home() {
           <div className="space-y-6 animate-in fade-in duration-500">
             {stockData && <StockInfo data={stockData} />}
 
-            <PriceChart data={chartData} onRangeChange={handleRangeChange} />
+            {chartData.length > 0 ? (
+              <PriceChart data={chartData} onRangeChange={handleRangeChange} />
+            ) : (
+              <div className="p-6 bg-white rounded-xl shadow-sm text-center text-gray-500">
+                No chart data available for this timeframe.
+              </div>
+            )}
 
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
               {analysis && <AIAnalysis data={analysis} />}
