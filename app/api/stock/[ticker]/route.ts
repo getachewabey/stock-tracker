@@ -101,10 +101,24 @@ export async function GET(request: Request, { params }: { params: { ticker: stri
         const yesterday = new Date(Date.now() - 86400000 * 2).toISOString().split('T')[0];
         const newsData = await fetchFinnhub('/company-news', { symbol: ticker, from: yesterday, to: today });
 
-        // 4. Fetch Candles 
-        const toTimestamp = Math.floor(Date.now() / 1000);
-        const fromTimestamp = toTimestamp - (30 * 24 * 60 * 60);
-        const candles = await fetchFinnhub('/stock/candle', { symbol: ticker, resolution: 'D', from: fromTimestamp.toString(), to: toTimestamp.toString() });
+        // 4. Fetch Candles (Handle 403 gracefully)
+        let chartData = [];
+        try {
+            const toTimestamp = Math.floor(Date.now() / 1000);
+            const fromTimestamp = toTimestamp - (30 * 24 * 60 * 60);
+            // Note: Free tier might block this or require different resolution.
+            // We catch the error so the whole dashboard doesn't crash.
+            const candles = await fetchFinnhub('/stock/candle', { symbol: ticker, resolution: 'D', from: fromTimestamp.toString(), to: toTimestamp.toString() });
+
+            if (candles.s === 'ok' && candles.t) {
+                chartData = candles.t.map((timestamp: number, index: number) => ({
+                    time: new Date(timestamp * 1000).toLocaleDateString(),
+                    price: candles.c[index]
+                }));
+            }
+        } catch (err) {
+            console.warn('Candle fetch failed (likely free tier limit). Returning empty chart.', err);
+        }
 
         // Transform Data
         const stockData = {
@@ -117,14 +131,6 @@ export async function GET(request: Request, { params }: { params: { ticker: stri
             volume: 'N/A',
             marketCap: profile.marketCapitalization ? formatLargeNumber(profile.marketCapitalization) : 'N/A'
         };
-
-        let chartData = [];
-        if (candles.s === 'ok' && candles.t) {
-            chartData = candles.t.map((timestamp: number, index: number) => ({
-                time: new Date(timestamp * 1000).toLocaleDateString(),
-                price: candles.c[index]
-            }));
-        }
 
         const news = Array.isArray(newsData) ? newsData.slice(0, 5).map((item: any) => ({
             id: item.id,
