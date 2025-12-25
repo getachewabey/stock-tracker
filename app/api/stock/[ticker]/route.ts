@@ -7,11 +7,24 @@ const BASE_URL = 'https://finnhub.io/api/v1';
 
 async function fetchFinnhub(endpoint: string, params: Record<string, string> = {}) {
     const url = new URL(`${BASE_URL}${endpoint}`);
-    url.searchParams.append('token', FINNHUB_API_KEY || '');
+    const token = FINNHUB_API_KEY || '';
+
+    // DEBUG LOGGING
+    console.log(`[API] Fetching ${endpoint}`);
+    console.log(`[API] Token First 5 chars: ${token.substring(0, 5)}...`);
+    console.log(`[API] Token Length: ${token.length}`);
+
+    url.searchParams.append('token', token);
     Object.entries(params).forEach(([key, value]) => url.searchParams.append(key, value));
 
     const res = await fetch(url.toString(), { next: { revalidate: 60 } });
-    if (!res.ok) throw new Error(`Finnhub API error: ${res.statusText}`);
+
+    if (!res.ok) {
+        const errorBody = await res.text();
+        console.error(`[API Error] Status: ${res.status} ${res.statusText}`);
+        console.error(`[API Error] Body: ${errorBody}`);
+        throw new Error(`Finnhub API error: ${res.statusText} - ${errorBody}`);
+    }
     return res.json();
 }
 
