@@ -21,9 +21,8 @@ async function fetchFinnhub(endpoint: string, params: Record<string, string> = {
 
     if (!res.ok) {
         const errorBody = await res.text();
-        console.error(`[API Error] Status: ${res.status} ${res.statusText}`);
-        console.error(`[API Error] Body: ${errorBody}`);
-        throw new Error(`Finnhub API error: ${res.statusText} - ${errorBody}`);
+        console.error(`[API Error] Endpoint: ${endpoint} Status: ${res.status} ${res.statusText}`);
+        throw new Error(`Finnhub API error (${endpoint}): ${res.statusText}`);
     }
     return res.json();
 }
@@ -90,24 +89,32 @@ export async function GET(request: Request, { params }: { params: { ticker: stri
     }
 
     try {
-        // 1. Fetch Quote
+        // 1. Fetch Quote (CRITICAL - If this fails, we fail)
         const quote = await fetchFinnhub('/quote', { symbol: ticker });
 
-        // 2. Fetch Profile
-        const profile = await fetchFinnhub('/stock/profile2', { symbol: ticker });
+        // 2. Fetch Profile (Optional)
+        let profile: any = {};
+        try {
+            profile = await fetchFinnhub('/stock/profile2', { symbol: ticker });
+        } catch (e) {
+            console.warn('Profile fetch failed:', e);
+        }
 
-        // 3. Fetch News 
-        const today = new Date().toISOString().split('T')[0];
-        const yesterday = new Date(Date.now() - 86400000 * 2).toISOString().split('T')[0];
-        const newsData = await fetchFinnhub('/company-news', { symbol: ticker, from: yesterday, to: today });
+        // 3. Fetch News (Optional)
+        let newsData: any[] = [];
+        try {
+            const today = new Date().toISOString().split('T')[0];
+            const yesterday = new Date(Date.now() - 86400000 * 2).toISOString().split('T')[0];
+            newsData = await fetchFinnhub('/company-news', { symbol: ticker, from: yesterday, to: today });
+        } catch (e) {
+            console.warn('News fetch failed:', e);
+        }
 
-        // 4. Fetch Candles (Handle 403 gracefully)
+        // 4. Fetch Candles (Optional)
         let chartData = [];
         try {
             const toTimestamp = Math.floor(Date.now() / 1000);
             const fromTimestamp = toTimestamp - (30 * 24 * 60 * 60);
-            // Note: Free tier might block this or require different resolution.
-            // We catch the error so the whole dashboard doesn't crash.
             const candles = await fetchFinnhub('/stock/candle', { symbol: ticker, resolution: 'D', from: fromTimestamp.toString(), to: toTimestamp.toString() });
 
             if (candles.s === 'ok' && candles.t) {
@@ -117,7 +124,7 @@ export async function GET(request: Request, { params }: { params: { ticker: stri
                 }));
             }
         } catch (err) {
-            console.warn('Candle fetch failed (likely free tier limit). Returning empty chart.', err);
+            console.warn('Candle fetch failed:', err);
         }
 
         // Transform Data
@@ -142,7 +149,7 @@ export async function GET(request: Request, { params }: { params: { ticker: stri
         })) : [];
 
         // Analysis - Try Gemini, fall back to Synthetic
-        let analysis = await getGeminiAnalysis(ticker, quote.c, quote.dp, newsData || []);
+        let analysis = await getGeminiAnalysis(ticker, quote.c, quote.dp, news);
         if (!analysis) {
             analysis = generateSyntheticAnalysis(ticker, quote.dp || 0);
         }
