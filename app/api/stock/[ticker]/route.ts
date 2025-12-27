@@ -89,86 +89,100 @@ export async function GET(request: Request, { params }: { params: { ticker: stri
     }
 
     try {
-        // 1. Fetch Quote (CRITICAL - If this fails, we fail)
+        // 1. Fetch Quote (CRITICAL)
         const quote = await fetchFinnhub('/quote', { symbol: ticker });
 
         if (!quote || quote.c === 0) {
              throw new Error('Stock not found');
         }
 
-        // 2. Fetch Profile (Optional)
+        // 2 & 3. Profile and News (Optional - failures ignored)
         let profile: any = {};
-        try {
-            profile = await fetchFinnhub('/stock/profile2', { symbol: ticker });
-        } catch (e) {
-            console.warn('Profile fetch failed:', e);
-        }
-
-        // 3. Fetch News (Optional)
         let newsData: any[] = [];
+        
         try {
-            const today = new Date().toISOString().split('T')[0];
-            const yesterday = new Date(Date.now() - 86400000 * 2).toISOString().split('T')[0];
-            newsData = await fetchFinnhub('/company-news', { symbol: ticker, from: yesterday, to: today });
+             const [profileRes, newsRes] = await Promise.allSettled([
+                fetchFinnhub('/stock/profile2', { symbol: ticker }),
+                fetchFinnhub('/company-news', { symbol: ticker, from: new Date(Date.now() - 86400000 * 2).toISOString().split('T')[0], to: new Date().toISOString().split('T')[0] })
+             ]);
+
+             if (profileRes.status === 'fulfilled') profile = profileRes.value;
+             if (newsRes.status === 'fulfilled') newsData = newsRes.value;
         } catch (e) {
-            console.warn('News fetch failed:', e);
+            console.warn('Optional data fetch failed', e);
         }
 
-        // 4. Fetch Candles (Attempt) OR Synthetic
-        let chartData = [];
+        // 4. Chart Data Strategy
+        let chartData: any[] = [];
         let isSynthetic = false;
 
         try {
             const toTimestamp = Math.floor(Date.now() / 1000);
-            const fromTimestamp = toTimestamp - (30 * 24 * 60 * 60);
-            // This often fails on free tier for specific endpoints or keys
-            const candles = await fetchFinnhub('/stock/candle', { symbol: ticker, resolution: 'D', from: fromTimestamp.toString(), to: toTimestamp.toString() });
+            const fromTimestamp = toTimestamp - (30 * 24 * 60 * 60); // 30 days
+            
+            // Attempt to fetch candles
+            const candles = await fetchFinnhub('/stock/candle', { 
+                symbol: ticker, 
+                resolution: 'D', 
+                from: fromTimestamp.toString(), 
+                to: toTimestamp.toString() 
+            });
 
-            if (candles.s === 'ok' && candles.t && candles.t.length > 0) {
+            if (candles && candles.s === 'ok' && candles.t && candles.t.length > 0) {
                 chartData = candles.t.map((timestamp: number, index: number) => ({
                     time: new Date(timestamp * 1000).toLocaleDateString(),
                     price: candles.c[index]
                 }));
             } else {
-                 throw new Error('No candle data returned');
+                 throw new Error('No candle data returned from API');
             }
         } catch (err) {
-            console.warn('Candle fetch failed, generating synthetic chart', err);
+            console.warn(`Candle fetch failed for ${ticker}:`, err);
             isSynthetic = true;
             
-            // SYNTHETIC CHART LOGIC
-            // Generate a plausible intraday chart based on High, Low, Open, Current
-            const points = 24; // Hourly-ish points
+            // --- SYNTHETIC CHART GENERATION ---
+            // Create a realistic intraday pattern
+            const points = 24; // ~Every 15-20 mins for a trading day simulation
             const open = quote.o || quote.c; 
             const close = quote.c;
             const high = quote.h || Math.max(open, close) * 1.01;
             const low = quote.l || Math.min(open, close) * 0.99;
-            const volatility = (high - low) / points;
+            const volatility = (high - low) / points || 0.05;
 
             let currentPrice = open;
+            // Market Open 9:30 AM
             const now = new Date();
-            const startTime = new Date(now.setHours(9, 30, 0, 0)).getTime(); // Market open 9:30 AM
+            const startTime = new Date(now.setHours(9, 30, 0, 0)).getTime(); 
+            
+            chartData = []; // Ensure empty
             
             for (let i = 0; i < points; i++) {
-                // Random walk tendency towards close
-                const remainingSteps = points - 1 - i;
-                const trend = (close - currentPrice) / (remainingSteps + 1);
-                const random = (Math.random() - 0.5) * volatility;
+                // Skew trend towards the actual closing price as day progresses
+                const progress = i / points;
+                const trend = (close - open) * progress; 
                 
-                currentPrice += trend + random;
-                // Clamp
-                currentPrice = Math.max(low, Math.min(high, currentPrice));
+                // Add randomness
+                const random = (Math.random() - 0.5) * volatility * 2;
+                
+                // Calculate price
+                let price = open + trend + random;
+                
+                // Clamp within high/low bounds (approximate)
+                price = Math.max(low, Math.min(high, price));
 
                 chartData.push({
-                    time: new Date(startTime + (i * 15 * 60 * 1000)).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-                    price: Number(currentPrice.toFixed(2))
+                    time: new Date(startTime + (i * 20 * 60 * 1000)).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+                    price: Number(price.toFixed(2))
                 });
             }
-            // Ensure last point is exactly closing/current price
-            chartData[chartData.length - 1].price = close;
+            
+            // Force the last point to match current price exactly for data consistency
+            if (chartData.length > 0) {
+                chartData[chartData.length - 1].price = close;
+            }
         }
 
-        // Transform Data
+        // Transform Meta Data
         const stockData = {
             symbol: ticker,
             price: quote.c,
@@ -176,12 +190,12 @@ export async function GET(request: Request, { params }: { params: { ticker: stri
             changePercent: quote.dp,
             high: quote.h,
             low: quote.l,
-            volume: 'N/A', // Finnhub free quote doesn't always have volume
+            volume: 'N/A', 
             marketCap: profile.marketCapitalization ? formatLargeNumber(profile.marketCapitalization) : 'N/A'
         };
 
         const news = Array.isArray(newsData) ? newsData.slice(0, 5).map((item: any) => ({
-            id: item.id,
+            id: item.id || Math.random().toString(),
             title: item.headline,
             summary: item.summary,
             source: item.source,
@@ -189,7 +203,7 @@ export async function GET(request: Request, { params }: { params: { ticker: stri
             url: item.url
         })) : [];
 
-        // Analysis - Try Gemini, fall back to Synthetic
+        // Analysis
         let analysis = await getGeminiAnalysis(ticker, quote.c, quote.dp, news);
         if (!analysis) {
             analysis = generateSyntheticAnalysis(ticker, quote.dp || 0);
