@@ -12,39 +12,47 @@ interface AnalysisData {
 
 export const AIAnalysis = ({ data }: { data: AnalysisData }) => {
     return (
-        <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6 h-full">
-            <div className="flex items-center gap-2 mb-6">
-                <Sparkles className="w-5 h-5 text-primary" />
+        <div className="glass-card p-6 h-full relative overflow-hidden group">
+            {/* Subtle Gradient Glow */}
+            <div className="absolute top-0 right-0 w-32 h-32 bg-indigo-500/10 rounded-full blur-3xl -mr-10 -mt-10 group-hover:bg-indigo-500/20 transition-all duration-700 pointer-events-none" />
+
+            <div className="flex items-center gap-3 mb-6 relative z-10">
+                <div className="p-2 bg-indigo-100 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 rounded-lg">
+                    <Sparkles className="w-5 h-5" />
+                </div>
                 <div>
-                    <h3 className="text-lg font-semibold text-gray-900">AI-Powered Analysis</h3>
-                    <p className="text-sm text-gray-500">Generated Insights for {data.symbol}</p>
+                    <h3 className="text-lg font-bold text-slate-800 dark:text-gray-100">AI Analysis</h3>
+                    <p className="text-xs text-slate-500 dark:text-gray-400 font-medium uppercase tracking-wider">Insights for {data.symbol}</p>
                 </div>
             </div>
 
-            <div className="flex gap-2 mb-6">
-                <Badge icon={<TrendingUp className="w-3 h-3" />} label="Bullish Momentum" type="success" />
-                <Badge icon={<CheckCircle2 className="w-3 h-3" />} label="Strong Buy" type="success" />
-                <Badge icon={<AlertTriangle className="w-3 h-3" />} label="High Volatility" type="warning" />
+            <div className="flex gap-2 mb-6 relative z-10">
+                {data.sentiment === 'bullish' && <Badge icon={<TrendingUp className="w-3 h-3" />} label="Bullish" type="success" />}
+                {data.sentiment === 'bearish' && <Badge icon={<TrendingUp className="w-3 h-3 rotate-180" />} label="Bearish" type="warning" />}
+                <Badge icon={<CheckCircle2 className="w-3 h-3" />} label={`Score: ${data.score}/10`} type="neutral" />
             </div>
 
-            <div className="prose prose-sm text-gray-600 mb-6 font-light leading-relaxed">
+            <div className="prose prose-sm text-slate-600 dark:text-slate-300 mb-6 font-light leading-relaxed relative z-10">
                 {data.summary}
             </div>
 
-            <div className="space-y-4">
-                <h4 className="font-semibold text-sm text-gray-900">Key Insights:</h4>
-                <ul className="space-y-2">
+            <div className="space-y-4 relative z-10">
+                <h4 className="font-semibold text-sm text-slate-900 dark:text-slate-100 flex items-center gap-2">
+                    <span className="w-1 h-4 bg-primary rounded-full" />
+                    Key Insights
+                </h4>
+                <div className="space-y-3">
                     {data.insights.map((insight, idx) => (
-                        <li key={idx} className="flex gap-2 text-sm text-gray-600 items-start">
-                            <span className="block w-1.5 h-1.5 mt-1.5 rounded-full bg-primary flex-shrink-0" />
+                        <div key={idx} className="flex gap-3 text-sm text-slate-600 dark:text-slate-400 items-start p-3 rounded-lg bg-white/30 dark:bg-slate-800/30 border border-white/20 dark:border-slate-700/30">
+                            <span className="flex-shrink-0 w-1.5 h-1.5 mt-2 rounded-full bg-indigo-400" />
                             {insight}
-                        </li>
+                        </div>
                     ))}
-                </ul>
+                </div>
             </div>
 
-            <div className="mt-8 p-3 bg-yellow-50 border border-yellow-100 rounded-lg text-xs text-yellow-700 leading-relaxed">
-                <strong>Disclaimer:</strong> This AI-generated analysis is for informational purposes only and should not be considered as financial advice. Always conduct your own research.
+            <div className="mt-8 p-3 bg-amber-50/50 dark:bg-amber-900/10 border border-amber-100 dark:border-amber-800/30 rounded-lg text-[10px] text-amber-700 dark:text-amber-500 leading-relaxed uppercase tracking-wide">
+                <strong>Disclaimer:</strong> AI-generated content. Not financial advice.
             </div>
         </div>
     );

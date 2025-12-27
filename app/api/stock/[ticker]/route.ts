@@ -92,6 +92,10 @@ export async function GET(request: Request, { params }: { params: { ticker: stri
         // 1. Fetch Quote (CRITICAL - If this fails, we fail)
         const quote = await fetchFinnhub('/quote', { symbol: ticker });
 
+        if (!quote || quote.c === 0) {
+             throw new Error('Stock not found');
+        }
+
         // 2. Fetch Profile (Optional)
         let profile: any = {};
         try {
@@ -110,21 +114,58 @@ export async function GET(request: Request, { params }: { params: { ticker: stri
             console.warn('News fetch failed:', e);
         }
 
-        // 4. Fetch Candles (Optional)
+        // 4. Fetch Candles (Attempt) OR Synthetic
         let chartData = [];
+        let isSynthetic = false;
+
         try {
             const toTimestamp = Math.floor(Date.now() / 1000);
             const fromTimestamp = toTimestamp - (30 * 24 * 60 * 60);
+            // This often fails on free tier for specific endpoints or keys
             const candles = await fetchFinnhub('/stock/candle', { symbol: ticker, resolution: 'D', from: fromTimestamp.toString(), to: toTimestamp.toString() });
 
-            if (candles.s === 'ok' && candles.t) {
+            if (candles.s === 'ok' && candles.t && candles.t.length > 0) {
                 chartData = candles.t.map((timestamp: number, index: number) => ({
                     time: new Date(timestamp * 1000).toLocaleDateString(),
                     price: candles.c[index]
                 }));
+            } else {
+                 throw new Error('No candle data returned');
             }
         } catch (err) {
-            console.warn('Candle fetch failed:', err);
+            console.warn('Candle fetch failed, generating synthetic chart', err);
+            isSynthetic = true;
+            
+            // SYNTHETIC CHART LOGIC
+            // Generate a plausible intraday chart based on High, Low, Open, Current
+            const points = 24; // Hourly-ish points
+            const open = quote.o || quote.c; 
+            const close = quote.c;
+            const high = quote.h || Math.max(open, close) * 1.01;
+            const low = quote.l || Math.min(open, close) * 0.99;
+            const volatility = (high - low) / points;
+
+            let currentPrice = open;
+            const now = new Date();
+            const startTime = new Date(now.setHours(9, 30, 0, 0)).getTime(); // Market open 9:30 AM
+            
+            for (let i = 0; i < points; i++) {
+                // Random walk tendency towards close
+                const remainingSteps = points - 1 - i;
+                const trend = (close - currentPrice) / (remainingSteps + 1);
+                const random = (Math.random() - 0.5) * volatility;
+                
+                currentPrice += trend + random;
+                // Clamp
+                currentPrice = Math.max(low, Math.min(high, currentPrice));
+
+                chartData.push({
+                    time: new Date(startTime + (i * 15 * 60 * 1000)).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+                    price: Number(currentPrice.toFixed(2))
+                });
+            }
+            // Ensure last point is exactly closing/current price
+            chartData[chartData.length - 1].price = close;
         }
 
         // Transform Data
@@ -135,7 +176,7 @@ export async function GET(request: Request, { params }: { params: { ticker: stri
             changePercent: quote.dp,
             high: quote.h,
             low: quote.l,
-            volume: 'N/A',
+            volume: 'N/A', // Finnhub free quote doesn't always have volume
             marketCap: profile.marketCapitalization ? formatLargeNumber(profile.marketCapitalization) : 'N/A'
         };
 
@@ -157,6 +198,7 @@ export async function GET(request: Request, { params }: { params: { ticker: stri
         return NextResponse.json({
             stock: stockData,
             chart: chartData,
+            isSynthetic,
             news,
             analysis
         });
