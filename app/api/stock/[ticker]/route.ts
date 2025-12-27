@@ -5,14 +5,13 @@ const FINNHUB_API_KEY = process.env.FINNHUB_API_KEY;
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 const BASE_URL = 'https://finnhub.io/api/v1';
 
-async function fetchFinnhub(endpoint: string, params: Record<string, string> = {}) {
+async function fetchFinnhub(endpoint: string, params: Record<string, string> = {}, shouldThrow = true) {
     const url = new URL(`${BASE_URL}${endpoint}`);
     const token = FINNHUB_API_KEY || '';
 
     // DEBUG LOGGING
     console.log(`[API] Fetching ${endpoint}`);
-    console.log(`[API] Token First 5 chars: ${token.substring(0, 5)}...`);
-    console.log(`[API] Token Length: ${token.length}`);
+    // console.log(`[API] Token First 5 chars: ${token.substring(0, 5)}...`); 
 
     url.searchParams.append('token', token);
     Object.entries(params).forEach(([key, value]) => url.searchParams.append(key, value));
@@ -20,6 +19,10 @@ async function fetchFinnhub(endpoint: string, params: Record<string, string> = {
     const res = await fetch(url.toString(), { next: { revalidate: 60 } });
 
     if (!res.ok) {
+        if (!shouldThrow) {
+            console.warn(`[API Warning] Endpoint: ${endpoint} Status: ${res.status}. Returning null as requested.`);
+            return null;
+        }
         const errorBody = await res.text();
         console.error(`[API Error] Endpoint: ${endpoint} Status: ${res.status} ${res.statusText}`);
         throw new Error(`Finnhub API error (${endpoint}): ${res.statusText}`);
@@ -125,13 +128,13 @@ export async function GET(request: Request, { params }: { params: { ticker: stri
             const toTimestamp = Math.floor(Date.now() / 1000);
             const fromTimestamp = toTimestamp - (30 * 24 * 60 * 60); // 30 days
             
-            // Attempt to fetch candles
+            // Attempt to fetch candles (pass false to suppress throwing on 403)
             const candles = await fetchFinnhub('/stock/candle', { 
                 symbol: ticker, 
                 resolution: 'D', 
                 from: fromTimestamp.toString(), 
                 to: toTimestamp.toString() 
-            });
+            }, false);
 
             if (candles && candles.s === 'ok' && candles.t && candles.t.length > 0) {
                 chartData = candles.t.map((timestamp: number, index: number) => ({
@@ -139,7 +142,8 @@ export async function GET(request: Request, { params }: { params: { ticker: stri
                     price: candles.c[index]
                 }));
             } else {
-                 throw new Error('No candle data returned from API');
+                 // Explicitly throw internal error to trigger catch block
+                 throw new Error(candles ? 'No candle data returned from API' : 'API returned 403/Error (Suppressed)');
             }
         } catch (err) {
             console.warn(`[API] Candle fetch failed for ${ticker} - Triggering Synthetic:`, err);
