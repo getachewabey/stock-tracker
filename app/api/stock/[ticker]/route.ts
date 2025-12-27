@@ -75,8 +75,13 @@ async function getGeminiAnalysis(symbol: string, price: number, change: number, 
         const result = await model.generateContent(prompt);
         const response = await result.response;
         return JSON.parse(response.text());
-    } catch (error) {
-        console.error("Gemini AI Error:", error);
+    } catch (error: any) {
+        // Suppress "API key leaked" error to prevent log spam
+        if (error.message?.includes('403') || error.message?.includes('leaked')) {
+            console.warn(`[Gemini] API Key issue detected. Falling back to synthetic analysis. (Error suppressed)`);
+        } else {
+            console.error("Gemini AI Error:", error);
+        }
         return null;
     }
 }
