@@ -142,7 +142,7 @@ export async function GET(request: Request, { params }: { params: { ticker: stri
                  throw new Error('No candle data returned from API');
             }
         } catch (err) {
-            console.warn(`Candle fetch failed for ${ticker}:`, err);
+            console.warn(`[API] Candle fetch failed for ${ticker} - Triggering Synthetic:`, err);
             isSynthetic = true;
             
             // --- SYNTHETIC CHART GENERATION ---
@@ -154,10 +154,16 @@ export async function GET(request: Request, { params }: { params: { ticker: stri
             const low = quote.l || Math.min(open, close) * 0.99;
             const volatility = (high - low) / points || 0.05;
 
+            console.log(`[API] Generating synthetic chart for ${ticker}. Open: ${open}, Close: ${close}, Vol: ${volatility}`);
+
             let currentPrice = open;
-            // Market Open 9:30 AM
+            // Market Open 9:30 AM EST (Use fixed UTC offsets to avoid server locale issues)
             const now = new Date();
-            const startTime = new Date(now.setHours(9, 30, 0, 0)).getTime(); 
+            // Start at 13:30 UTC which is 9:30 AM ET roughly (simplified)
+            // better: just take current time and subtract points * interval
+            const endTime = now.getTime();
+            const interval = 30 * 60 * 1000; // 30 mins
+            const startTime = endTime - (points * interval);
             
             chartData = []; // Ensure empty
             
@@ -175,8 +181,13 @@ export async function GET(request: Request, { params }: { params: { ticker: stri
                 // Clamp within high/low bounds (approximate)
                 price = Math.max(low, Math.min(high, price));
 
+                const timePoint = new Date(startTime + (i * interval));
+                
+                // Use a simpler time format for the chart label
+                const timeString = timePoint.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false });
+
                 chartData.push({
-                    time: new Date(startTime + (i * 20 * 60 * 1000)).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+                    time: timeString,
                     price: Number(price.toFixed(2))
                 });
             }
@@ -185,6 +196,7 @@ export async function GET(request: Request, { params }: { params: { ticker: stri
             if (chartData.length > 0) {
                 chartData[chartData.length - 1].price = close;
             }
+            console.log(`[API] Generated ${chartData.length} synthetic points.`);
         }
 
         // Transform Meta Data
